@@ -22,8 +22,11 @@ from rich.live import Live
 from rich.text import Text
 import click
 import time
+import threading
+import select
+import sys
 from transformers import pipeline, TextIteratorStreamer
-from threading import Thread
+from threading import Thread, Event
 try:
     from llama_cpp import Llama
     LLAMA_CPP_AVAILABLE = True
@@ -38,6 +41,11 @@ from utils.model_modifiers import (
 
 # Initialize rich console for beautiful output
 console = Console()
+
+# Global stop event for generation control
+stop_generation_event = Event()
+
+
 
 
 class UnifiedGenerator:
@@ -307,6 +315,126 @@ def process_input(generator, user_input: str, max_length: int = 100) -> str:
         return f"Error processing input: {e}"
 
 
+def input_monitor(stop_event: Event):
+    """Monitor for ':q' + Enter input to stop generation."""
+    try:
+        while not stop_event.is_set():
+            # Check if input is available (non-blocking)
+            if select.select([sys.stdin], [], [], 0.1)[0]:
+                line = sys.stdin.readline().strip().lower()
+                if line == ':q':
+                    stop_event.set()
+                    break
+    except Exception:
+        # Ignore any input monitoring errors
+        pass
+
+
+def generate_in_thread(generator, user_input: str, max_length: int, response_text: Text, stop_event: Event):
+    """Run generation in a separate thread that can be stopped cleanly."""
+    try:
+        for token in generator.generate_streaming(user_input, max_length, temperature=0.7):
+            if stop_event.is_set():
+                break
+            if token:
+                response_text.append(token)
+    except Exception as e:
+        # Handle any generation errors silently - main thread will handle display
+        pass
+
+
+def stream_generation(generator, user_input: str, max_length: int) -> bool:
+    """Handle streaming generation with proper Ctrl+C isolation.
+    
+    Args:
+        generator: The UnifiedGenerator instance
+        user_input: User's input text
+        max_length: Maximum generation length
+        
+    Returns:
+        True if generation completed normally, False if stopped by user
+    """
+    console.print("\n[green]🤖 Model Response:[/green]")
+    console.print("[dim]Type ':q' and press Enter to stop generation[/dim]")
+    
+    response_text = Text()
+    response_panel = Panel(
+        response_text,
+        title="[green]🤖 Generating...[/green]",
+        border_style="green"
+    )
+    
+    # Reset stop event
+    stop_generation_event.clear()
+    
+    # Start generation in a separate thread
+    generation_thread = Thread(
+        target=generate_in_thread, 
+        args=(generator, user_input, max_length, response_text, stop_generation_event),
+        daemon=True
+    )
+    generation_thread.start()
+    
+    # Start input monitor in a separate thread
+    input_thread = Thread(
+        target=input_monitor,
+        args=(stop_generation_event,),
+        daemon=True
+    )
+    input_thread.start()
+    
+    with Live(response_panel, refresh_per_second=10) as live:
+        token_count = 0
+        start_time = time.time()
+        last_token_count = 0
+        
+        # Monitor generation progress without KeyboardInterrupt handling
+        while generation_thread.is_alive() and not stop_generation_event.is_set():
+            # Check for new tokens
+            current_token_count = len(str(response_text).strip())
+            if current_token_count > last_token_count:
+                token_count = current_token_count
+                last_token_count = current_token_count
+                
+                # Update progress info
+                elapsed = time.time() - start_time
+                tokens_per_sec = token_count / elapsed if elapsed > 0 else 0
+                
+                # Update panel title with progress
+                live.update(Panel(
+                    response_text,
+                    title=f"[green]🤖 Generating... ({token_count} tokens, {tokens_per_sec:.1f} tok/s) [dim]Type ':q' + Enter to stop[/dim][/green]",
+                    border_style="green"
+                ))
+            
+            # Small sleep to prevent busy waiting
+            time.sleep(0.1)
+        
+        # Wait for generation thread to finish
+        generation_thread.join(timeout=1.0)
+        
+        # Final update
+        elapsed = time.time() - start_time
+        final_token_count = len(str(response_text).strip())
+        tokens_per_sec = final_token_count / elapsed if elapsed > 0 else 0
+        
+        if stop_generation_event.is_set():
+            live.update(Panel(
+                response_text,
+                title=f"[yellow]⏹ Stopped ({final_token_count} tokens, {tokens_per_sec:.1f} tok/s, {elapsed:.1f}s)[/yellow]",
+                border_style="yellow"
+            ))
+            console.print("\n[yellow]⏹ Generation stopped by user[/yellow]")
+            return False
+        else:
+            live.update(Panel(
+                response_text,
+                title=f"[green]✓ Complete ({final_token_count} tokens, {tokens_per_sec:.1f} tok/s, {elapsed:.1f}s)[/green]",
+                border_style="green"
+            ))
+            return True
+
+
 def display_model_info(generator):
     """Display information about the loaded model."""
     try:
@@ -418,6 +546,7 @@ def main():
     
     # Main interaction loop
     console.print("\n[green]Ready for input! Type 'quit' to exit.[/green]")
+    console.print("[dim]Tip: During generation, type ':q' and press Enter to stop[/dim]")
     
     while True:
         try:
@@ -439,69 +568,14 @@ def main():
                 border_style="cyan"
             ))
             
-            # Stream the response with real-time display
-            console.print("\n[green]🤖 Model Response:[/green]")
+            # Use the dedicated streaming function
+            stream_generation(generator, user_input, max_length)
             
-            response_text = Text()
-            response_panel = Panel(
-                response_text,
-                title="[green]🤖 Generating...[/green]",
-                border_style="green"
-            )
-            
-            try:
-                with Live(response_panel, refresh_per_second=10) as live:
-                    token_count = 0
-                    start_time = time.time()
-                    
-                    for token in generator.generate_streaming(user_input, max_length, temperature=0.7):
-                        if token:
-                            response_text.append(token)
-                            token_count += 1
-                            
-                            # Update progress info
-                            elapsed = time.time() - start_time
-                            tokens_per_sec = token_count / elapsed if elapsed > 0 else 0
-                            
-                            # Update panel title with progress
-                            live.update(Panel(
-                                response_text,
-                                title=f"[green]🤖 Generating... ({token_count} tokens, {tokens_per_sec:.1f} tok/s)[/green]",
-                                border_style="green"
-                            ))
-                    
-                    # Final update
-                    elapsed = time.time() - start_time
-                    tokens_per_sec = token_count / elapsed if elapsed > 0 else 0
-                    live.update(Panel(
-                        response_text,
-                        title=f"[green]✓ Complete ({token_count} tokens, {tokens_per_sec:.1f} tok/s, {elapsed:.1f}s)[/green]",
-                        border_style="green"
-                    ))
-                    
-            except Exception as e:
-                console.print(f"[red]Streaming error: {e}[/red]")
-                console.print("[yellow]Falling back to regular generation...[/yellow]")
-                
-                with console.status("[bold green]🤖 Generating response..."):
-                    result = process_input(generator, user_input, max_length)
-                
-                if result:
-                    console.print(Panel(
-                        result,
-                        title="[green]🤖 Model Response[/green]",
-                        expand=False,
-                        border_style="green"
-                    ))
-                else:
-                    console.print(Panel(
-                        "[dim]No response generated[/dim]",
-                        title="[yellow]⚠️  Empty Response[/yellow]",
-                        expand=False,
-                        border_style="yellow"
-                    ))
+            # Continue to next input regardless of whether generation completed or was stopped
             
         except KeyboardInterrupt:
+            # This catches Ctrl+C during input prompt - exit the app
+            console.print("\n[blue]👋 Goodbye![/blue]")
             break
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
