@@ -61,6 +61,7 @@ python -c "from utils.model_size_estimator import check_model_compatibility; pri
 
 The framework implements advanced real-time streaming:
 - **Token-by-token generation**: See text appear as the model generates it
+- **Interactive control**: Type ':q' + Enter to stop generation mid-stream
 - **Live performance metrics**: Real-time tokens/second and progress tracking
 - **Visual feedback**: Live updating Rich panels with progress indicators
 - **Cross-platform compatibility**: Native streaming for both Transformers and GGUF models
@@ -109,8 +110,9 @@ The framework supports:
 6. **Memory Awareness**: Use system analysis tools to check compatibility before loading models
 7. **Error Handling**: Implement graceful fallbacks for streaming and other operations
 8. **Visual Separation**: Use color-coded panels to separate user input (cyan) from model output (green)
-9. **Research Integration**: Use the model research tools to validate model choices
-10. **Caching Strategy**: Leverage the models_cache directory for efficient model reuse
+9. **Interactive Control**: Implement `:q` + Enter stop functionality for user control during generation
+10. **Research Integration**: Use the model research tools to validate model choices
+11. **Caching Strategy**: Leverage the models_cache directory for efficient model reuse
 
 ## Model Loading Patterns
 
@@ -132,14 +134,31 @@ generator = create_gguf_generator("TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF:Q4_0")
 generator = UnifiedGenerator(pipeline_or_llm, model_type)
 text = generator.generate(prompt, max_length=100)
 
-# Real-time streaming with Rich Live display
+# Real-time streaming with Rich Live display and stop control
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
+from threading import Thread, Event
 
+# Real-time streaming with 's' + Enter stop control
 response_text = Text()
+
+# Set up threading for generation and input monitoring
+stop_event = Event()
+generation_thread = Thread(target=generate_in_thread, args=(generator, prompt, max_length, response_text, stop_event))
+input_thread = Thread(target=input_monitor, args=(stop_event,))
+
+generation_thread.start()
+input_thread.start()
+
 with Live(Panel(response_text, title="🤖 Generating..."), refresh_per_second=10) as live:
-    for token in generator.generate_streaming(prompt, max_length=100):
-        response_text.append(token)
-        live.update(Panel(response_text, title=f"🤖 Generating... ({len(response_text)} tokens)"))
+    while generation_thread.is_alive() and not stop_event.is_set():
+        live.update(Panel(response_text, title=f"🤖 Generating... ({len(response_text)} tokens) Type ':q' + Enter to stop"))
+        time.sleep(0.1)
+    
+    # Handle completion vs stopping
+    if stop_event.is_set():
+        live.update(Panel(response_text, title="⏹ Generation stopped by user", border_style="yellow"))
+    else:
+        live.update(Panel(response_text, title="✓ Generation complete", border_style="green"))
 ```
