@@ -114,6 +114,7 @@ python utils/model_size_estimator.py
   - Token-by-token real-time generation display
   - Live performance metrics (tokens/second, elapsed time)
   - Progress tracking with token count
+  - **Interactive Stop Control**: Type ':q' + Enter to stop generation mid-stream
   - Visual feedback with live updating Rich panels
   - Graceful fallback to non-streaming if needed
 - **Model Support**:
@@ -124,9 +125,10 @@ python utils/model_size_estimator.py
 - **User Experience**:
   - Interactive model selection with descriptions
   - Color-coded panels (cyan for input, green for output)
+  - Vim-style stop command (`:q` + Enter) to halt generation
   - Configurable generation parameters
   - Detailed model information display
-  - Professional terminal interface
+  - Professional terminal interface with live progress tracking
 
 ## 🔧 Utility Modules
 
