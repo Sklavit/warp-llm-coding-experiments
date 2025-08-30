@@ -2,7 +2,12 @@
 
 Testing how good is warp coding on the task of conducting several experiments with LLMs.
 
-*Note: After 150 prompts with Warp, I switched to Claude Code to continue development.*
+*Note: After 150 prompts with Warp, my free plan was finished.
+I should say, that I experience only a couple of glitches during this time.
+So the overall performance is astonishing.
+Then, I switched to Claude Code to finish the last task in hand and make commits.
+Also, I plan to use Claude to add possibility to stop generation on the fly.*
+
 
 This project provides a framework for experimenting with Large Language Models (LLMs), including capabilities to modify tokenizers, layers, and model behavior using a functional programming approach.
 
@@ -69,6 +74,8 @@ warp-llm-coding-experiments/
    ```
 
 ## 🎯 Usage
+
+⚠️ Note: You should activate environment or use prefix `uv run <your command>` 
 
 ### List Available Experiments
 ```bash
