@@ -6,7 +6,9 @@ Testing how good is warp coding on the task of conducting several experiments wi
 I should say, that I experience only a couple of glitches during this time.
 So the overall performance is astonishing.
 Then, I switched to Claude Code to finish the last task in hand and make commits.
-Also, I plan to use Claude to add possibility to stop generation on the fly.*
+Also, I plan to use Claude to add possibility to stop generation on the fly.
+It seems it is impossible with current set of components, but Cluade Code 
+failed to identify that it is impossible.*
 
 
 This project provides a framework for experimenting with Large Language Models (LLMs), including capabilities to modify tokenizers, layers, and model behavior using a functional programming approach.
